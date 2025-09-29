@@ -79,6 +79,10 @@ class SimpleTranslationService:
         
         return translations
     
+    async def translate_text(self, text: str, target_language: str) -> str:
+        """Async wrapper for translation (for compatibility)"""
+        return self._simple_translate(text, target_language)
+    
     def _simple_translate(self, text: str, target_language: str) -> str:
         """Simple translation using predefined mappings"""
         text_lower = text.lower().strip()

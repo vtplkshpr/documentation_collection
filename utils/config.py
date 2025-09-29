@@ -32,20 +32,22 @@ class Config:
     TRANSLATION_CACHE = os.getenv('TRANSLATION_CACHE', 'True').lower() == 'true'
     
     # Search Engines Configuration
-    ENABLED_SEARCH_ENGINES = os.getenv('ENABLED_SEARCH_ENGINES', 'google,bing,duckduckgo').split(',')
+    ENABLED_SEARCH_ENGINES = os.getenv('ENABLED_SEARCH_ENGINES', 'google,bing,duckduckgo,baidu').split(',')
     GOOGLE_SEARCH_DELAY = float(os.getenv('GOOGLE_SEARCH_DELAY', '1.0'))
     BING_SEARCH_DELAY = float(os.getenv('BING_SEARCH_DELAY', '1.5'))
     DUCKDUCKGO_SEARCH_DELAY = float(os.getenv('DUCKDUCKGO_SEARCH_DELAY', '1.0'))
+    BAIDU_SEARCH_DELAY = float(os.getenv('BAIDU_SEARCH_DELAY', '1.5'))
     
     # Supported Languages
-    SUPPORTED_LANGUAGES = ['en', 'vi', 'ja', 'ko', 'ru', 'fa']
+    SUPPORTED_LANGUAGES = ['en', 'vi', 'ja', 'ko', 'ru', 'fa', 'zh']
     LANGUAGE_NAMES = {
         'en': 'English',
         'vi': 'Vietnamese', 
         'ja': 'Japanese',
         'ko': 'Korean',
         'ru': 'Russian',
-        'fa': 'Persian'
+        'fa': 'Persian',
+        'zh': 'Chinese (Simplified)'
     }
     
     # File Types
@@ -55,7 +57,8 @@ class Config:
     SEARCH_DELAYS = {
         'google': GOOGLE_SEARCH_DELAY,
         'bing': BING_SEARCH_DELAY,
-        'duckduckgo': DUCKDUCKGO_SEARCH_DELAY
+        'duckduckgo': DUCKDUCKGO_SEARCH_DELAY,
+        'baidu': BAIDU_SEARCH_DELAY
     }
     
     @classmethod

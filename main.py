@@ -72,9 +72,18 @@ class DocumentationCollectionCLI:
         table = Table(title="Available Search Engines")
         table.add_column("Engine", style="cyan")
         table.add_column("Status", style="green")
+        table.add_column("Description", style="yellow")
+        
+        engine_descriptions = {
+            "google": "Global search engine",
+            "bing": "Microsoft search engine", 
+            "duckduckgo": "Privacy-focused search",
+            "baidu": "Chinese search engine (with translation)"
+        }
         
         for engine in config.ENABLED_SEARCH_ENGINES:
-            table.add_row(engine, "✓ Enabled")
+            description = engine_descriptions.get(engine, "Search engine")
+            table.add_row(engine, "✓ Enabled", description)
         
         console.print(table)
     

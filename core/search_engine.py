@@ -187,6 +187,14 @@ class MultiSearchEngine:
         
         if "duckduckgo" in config.ENABLED_SEARCH_ENGINES:
             self.handlers["duckduckgo"] = DuckDuckGoSearchHandler()
+        
+        
+        if "baidu" in config.ENABLED_SEARCH_ENGINES:
+            try:
+                from .baidu_search_handler import BaiduSearchHandler
+                self.handlers["baidu"] = BaiduSearchHandler()
+            except ImportError as e:
+                logger.warning(f"Failed to import BaiduSearchHandler: {e}")
     
     async def search_all_engines(self, query: str, max_results_per_engine: int = 10) -> List[SearchResult]:
         """

@@ -78,7 +78,7 @@ class SearchService:
             # Step 2: Query optimization (AI optimization is optional)
             # User can specify additional languages via --languages parameter
             languages = search_criteria.get('additional_languages', []) or ['en']  # Default to English only
-            search_engines = ['google', 'bing', 'duckduckgo']
+            search_engines = config.ENABLED_SEARCH_ENGINES
             ai_optimization_enabled = search_criteria.get('ai_optimization', False)
             
             if ai_optimization_enabled:
