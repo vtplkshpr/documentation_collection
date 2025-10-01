@@ -9,16 +9,11 @@ from pathlib import Path
 from utils.config import config
 from utils.database import db_manager
 from models.search_session import SearchSession, SearchResult, SearchStatus, DownloadStatus
-# Import translation service from language_translation ability
+# Import module communication system
 import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../language_translation'))
-try:
-    from services.translation_service import translation_service
-except ImportError:
-    # Fallback to simple translation if language_translation not available
-    from core.simple_translator import SimpleTranslationService
-    translation_service = SimpleTranslationService()
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent / 'core'))
+from module_communication import module_comm
 from core.search_engine import MultiSearchEngine
 from core.document_downloader import DocumentDownloader
 from core.content_processor import ContentProcessor
@@ -26,6 +21,7 @@ from core.ai_analyzer_ollama import AIContentAnalyzer
 from core.query_optimizer import QueryOptimizer
 from core.criteria_analyzer import CriteriaAnalyzer
 from core.redis_manager import get_redis_manager
+from core.language_detector import LanguageDetector
 from .file_manager import FileManager
 
 logger = logging.getLogger(__name__)
@@ -34,15 +30,56 @@ class SearchService:
     """Main search service for documentation collection"""
     
     def __init__(self):
-        # Use AI Local Translation Service instead of SimpleTranslationService
-        self.translator = translation_service
+        # Use module communication system
+        self.translator = module_comm
         self.search_engine = MultiSearchEngine()
         self.file_manager = FileManager()
         self.content_processor = ContentProcessor()
         self.ai_analyzer = AIContentAnalyzer()
         self.query_optimizer = QueryOptimizer(self.ai_analyzer)
         self.criteria_analyzer = CriteriaAnalyzer(self.ai_analyzer)
+        self.language_detector = LanguageDetector()
         self.redis_manager = get_redis_manager()
+    
+    async def _translate_query_for_language(self, query: str, target_language: str, source_language: str = None) -> str:
+        """
+        Translate query to target language using language_translation module
+        
+        Args:
+            query: Original query
+            target_language: Target language code
+            source_language: Source language code (auto-detect if None)
+            
+        Returns:
+            Translated query
+        """
+        try:
+            # If source language not provided, detect it
+            if not source_language:
+                detection_result = self.language_detector.detect_language(query)
+                source_language = detection_result['language']
+                logger.info(f"Auto-detected source language: {source_language}")
+
+            # If source and target are the same, return original
+            if source_language == target_language:
+                logger.info(f"Source and target language same ({target_language}), using original query")
+                return query
+
+            # Translate query using language_translation module
+            logger.info(f"Translating query from {source_language} to {target_language}")
+            translated_query = await self.translator.translate_text(query, target_language, source_language)
+
+            # If translation failed or same as original, log warning
+            if not translated_query or translated_query == query:
+                logger.warning(f"Translation failed or returned original query for {source_language}->{target_language}")
+                return query
+
+            logger.info(f"Translated query: '{query}' -> '{translated_query}'")
+            return translated_query
+
+        except Exception as e:
+            logger.error(f"Query translation failed: {e}")
+            return query  # Fallback to original query
     
     async def search_documents(self, query: str, search_criteria: Dict[str, Any] = None) -> int:
         """
@@ -75,7 +112,12 @@ class SearchService:
                 # Update search criteria with analyzed version
                 search_criteria['analyzed_criteria'] = analyzed_criteria
             
-            # Step 2: Query optimization (AI optimization is optional)
+            # Step 2: Detect source language and prepare translation
+            detection_result = self.language_detector.detect_language(query)
+            source_language = detection_result['language']
+            logger.info(f"Detected source language: {source_language} (confidence: {detection_result['confidence']:.2f})")
+            
+            # Step 3: Query optimization (AI optimization is optional)
             # User can specify additional languages via --languages parameter
             languages = search_criteria.get('additional_languages', []) or ['en']  # Default to English only
             search_engines = config.ENABLED_SEARCH_ENGINES
@@ -89,18 +131,23 @@ class SearchService:
                 )
                 queries_to_use = optimized_queries
             else:
-                logger.info(f"Searching with original query for {len(languages)} languages and {len(search_engines)} engines...")
-                # Create simple query structure (no AI optimization)
+                logger.info(f"Searching with translated queries for {len(languages)} languages and {len(search_engines)} engines...")
+                # Create query structure with translation
                 simple_queries = {}
                 for language in languages:
+                    # Translate query for this language
+                    translated_query = await self._translate_query_for_language(query, language, source_language)
+                    
                     simple_queries[language] = {}
                     for engine in search_engines:
                         simple_queries[language][engine] = [{
-                            'query': query,
-                            'type': 'original',
+                            'query': translated_query,
+                            'type': 'translated',
                             'confidence': 1.0,
-                            'reasoning': 'Using original query without AI optimization',
-                            'original_query': query
+                            'reasoning': f'Translated from {source_language} to {language}',
+                            'original_query': query,
+                            'source_language': source_language,
+                            'target_language': language
                         }]
                 queries_to_use = simple_queries
             
@@ -113,7 +160,7 @@ class SearchService:
                 )
                 logger.info(f"Exported query info to: {optimized_queries_path}")
             
-            # Step 4: Search using queries (optimized or original)
+            # Step 4: Search using queries (optimized or translated)
             all_results = []
             for language, engines in queries_to_use.items():
                 for engine, queries in engines.items():
@@ -144,7 +191,7 @@ class SearchService:
                                 logger.info(f"Duplicate URL skipped: {result.url} (found in {duplicate_data.get('search_engine', 'unknown')})")
                                 continue
                             
-                            # Create search result
+                            # Create search result with translation metadata
                             search_result = SearchResult(
                                 session_id=session_id,
                                 language=language,
@@ -155,12 +202,16 @@ class SearchService:
                             )
                             all_results.append(search_result)
                             
-                            # Mark URL as processed in Redis
+                            # Mark URL as processed in Redis with translation metadata
                             result_data = {
                                 'url': result.url,
                                 'title': result.title,
                                 'search_engine': result.search_engine,
                                 'language': language,
+                                'translated_query': search_query,
+                                'original_query': query_data.get('original_query', search_query),
+                                'source_language': query_data.get('source_language', 'unknown'),
+                                'target_language': language,
                                 'session_id': session_id,
                                 'processed_at': datetime.now().isoformat()
                             }
