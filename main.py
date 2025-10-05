@@ -1,354 +1,394 @@
 """
-Main entry point for documentation collection module
+Documentation Collection Plugin for lkwolfSAI Ecosystem
+Plug-and-Play Implementation
 """
 import asyncio
 import logging
 import sys
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 import click
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.panel import Panel
-from rich.text import Text
 
-# Add current directory to path for imports if not already present
+# Add current directory to path for imports
 current_dir = str(Path(__file__).parent)
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-from utils.config import config
-from utils.database import db_manager
-from services.search_service import SearchService
-from services.file_manager import FileManager
-from core.redis_manager import get_redis_manager
+# Import BasePlugin
+sys.path.append(str(Path(__file__).parent.parent))
+from base_plugin import BasePlugin, PluginInfo, PluginStatus
+
+# Try to import optional dependencies
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    HAS_DOTENV = True
+except ImportError:
+    HAS_DOTENV = False
+
+try:
+    from utils.config import config
+    from utils.database import db_manager
+    from services.search_service import SearchService
+    from services.file_manager import FileManager
+    from core.redis_manager import get_redis_manager
+    HAS_FULL_DEPS = True
+except ImportError as e:
+    HAS_FULL_DEPS = False
+    print(f"Warning: Some dependencies not available: {e}")
 
 # Setup logging
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(config.LOG_FILE),
-        logging.StreamHandler()
-    ]
-)
-
 logger = logging.getLogger(__name__)
+
+class DocumentationCollectionPlugin(BasePlugin):
+    """Documentation Collection plugin implementation"""
+    
+    def __init__(self):
+        self._plugin_info = PluginInfo(
+            name="documentation_collection",
+            version="1.0.0",
+            description="Search and collect online documents in multiple languages",
+            author="lkwolfSAI Team",
+            status=PluginStatus.ACTIVE,
+            dependencies=[
+                "click>=8.0.0",
+                "rich>=13.0.0",
+                "python-dotenv>=1.0.0",
+                "requests>=2.25.0"
+            ],
+            supported_languages=["en", "vi", "ja", "ko", "ru", "fa", "zh"],
+            required_services=[],
+            config_schema={
+                "MAX_RESULTS_PER_ENGINE": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Maximum results per search engine"
+                },
+                "REQUEST_DELAY": {
+                    "type": "float",
+                    "default": 1.0,
+                    "description": "Delay between requests in seconds"
+                }
+            },
+            commands=[
+                {
+                    "name": "search",
+                    "description": "Search and collect documents",
+                    "options": [
+                        {
+                            "name": "query",
+                            "type": "string",
+                            "required": True,
+                            "help": "Search topic/subject"
+                        },
+                        {
+                            "name": "criteria",
+                            "type": "string",
+                            "required": False,
+                            "help": "Filter criteria for AI analysis"
+                        },
+                        {
+                            "name": "max-results",
+                            "type": "integer",
+                            "required": False,
+                            "help": "Max results per engine (default: 10)"
+                        }
+                    ]
+                }
+            ]
+        )
+        self._initialized = False
+        self._search_service = None
+        self._file_manager = None
+    
+    @property
+    def plugin_info(self) -> PluginInfo:
+        """Return plugin metadata"""
+        return self._plugin_info
+    
+    async def initialize(self) -> bool:
+        """Initialize plugin"""
+        try:
+            logger.info(f"Initializing {self.plugin_info.name}...")
+            
+            # Initialize services if available
+            if HAS_FULL_DEPS:
+                try:
+                    self._search_service = SearchService()
+                    self._file_manager = FileManager()
+                    logger.info("✓ Full services initialized")
+                except Exception as e:
+                    logger.warning(f"Some services not available: {e}")
+                    self._search_service = None
+                    self._file_manager = None
+            else:
+                logger.info("✓ Running in minimal mode")
+            
+            self._initialized = True
+            logger.info(f"✓ {self.plugin_info.name} initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize {self.plugin_info.name}: {e}")
+            return False
+    
+    async def cleanup(self) -> bool:
+        """Cleanup plugin resources"""
+        try:
+            # Cleanup services
+            self._search_service = None
+            self._file_manager = None
+            self._initialized = False
+            logger.info(f"✓ {self.plugin_info.name} cleaned up successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup {self.plugin_info.name}: {e}")
+            return False
+    
+    def get_cli_commands(self) -> list:
+        """Return Click commands for CLI integration"""
+        return [main]
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Return plugin health status"""
+        return {
+            "plugin": self.plugin_info.name,
+            "version": self.plugin_info.version,
+            "status": "healthy" if self._initialized else "not_initialized",
+            "services": {
+                "search_service": "healthy" if self._search_service else "not_available",
+                "file_manager": "healthy" if self._file_manager else "not_available",
+                "dependencies": "full" if HAS_FULL_DEPS else "minimal"
+            }
+        }
+    
+    def validate_config(self, config: Dict[str, Any]) -> list:
+        """Validate plugin configuration"""
+        errors = []
+        
+        # Validate numeric settings
+        if "MAX_RESULTS_PER_ENGINE" in config:
+            try:
+                value = float(config["MAX_RESULTS_PER_ENGINE"])
+                if value < 1:
+                    errors.append("MAX_RESULTS_PER_ENGINE must be positive")
+            except (ValueError, TypeError):
+                errors.append("MAX_RESULTS_PER_ENGINE must be a valid number")
+        
+        if "REQUEST_DELAY" in config:
+            try:
+                value = float(config["REQUEST_DELAY"])
+                if value < 0:
+                    errors.append("REQUEST_DELAY must be non-negative")
+            except (ValueError, TypeError):
+                errors.append("REQUEST_DELAY must be a valid number")
+        
+        return errors
+    
+    async def run(self, data: Any = None) -> Any:
+        """Main plugin execution method"""
+        if not self._initialized:
+            await self.initialize()
+        
+        return {
+            "status": "success",
+            "message": f"{self.plugin_info.name} executed",
+            "data": data
+        }
+
+# CLI Implementation
 console = Console()
 
 class DocumentationCollectionCLI:
     """CLI interface for documentation collection"""
     
     def __init__(self):
-        self.search_service = SearchService()
-        self.file_manager = FileManager()
+        self.plugin = DocumentationCollectionPlugin()
     
-    def display_banner(self):
-        """Display welcome banner"""
-        banner = Text("""
-╔══════════════════════════════════════════════════════════════╗
-║                    DOCUMENTATION COLLECTION                 ║
-║                                                              ║
-║  Tìm kiếm và thu thập tài liệu online đa ngôn ngữ           ║
-║  Multi-language online document search and collection       ║
-╚══════════════════════════════════════════════════════════════╝
-        """, style="bold blue")
-        console.print(Panel(banner, title="Welcome", border_style="blue"))
+    async def run_search(self, query: str, criteria: str = None, max_results: int = 10, 
+                        export_format: str = "csv", languages: str = None, 
+                        session_id: str = None, stats: bool = False, 
+                        interactive: bool = False, ai_analysis: bool = True,
+                        no_ai: bool = False, enable_ai_optimization: bool = False,
+                        search_pages: int = 1, aggressive_search: bool = False):
+        """Run documentation collection search"""
+        
+        if not await self.plugin.initialize():
+            console.print("[red]Failed to initialize plugin[/red]")
+            return
+        
+        try:
+            if stats:
+                await self._show_stats()
+                return
+            
+            if session_id:
+                await self._show_session_results(session_id, export_format)
+                return
+            
+            if interactive:
+                await self._interactive_mode()
+                return
+            
+            # Run search
+            await self._run_search(query, criteria, max_results, export_format, 
+                                 languages, ai_analysis, no_ai, enable_ai_optimization,
+                                 search_pages, aggressive_search)
+            
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+        finally:
+            await self.plugin.cleanup()
     
-    def display_supported_languages(self):
-        """Display supported languages"""
-        table = Table(title="Supported Languages")
-        table.add_column("Code", style="cyan")
-        table.add_column("Language", style="magenta")
+    async def _run_search(self, query: str, criteria: str, max_results: int,
+                         export_format: str, languages: str, ai_analysis: bool,
+                         no_ai: bool, enable_ai_optimization: bool,
+                         search_pages: int, aggressive_search: bool):
+        """Execute the search"""
+        console.print(f"\n[bold blue]🔍 Starting documentation collection...[/bold blue]")
+        console.print(f"Query: [cyan]{query}[/cyan]")
         
-        for code, name in config.LANGUAGE_NAMES.items():
-            table.add_row(code, name)
+        if not self.plugin._search_service:
+            console.print("[red]Search service not available. Running in minimal mode.[/red]")
+            console.print("[yellow]Please install full dependencies for complete functionality.[/yellow]")
+            return
         
-        console.print(table)
-    
-    def display_search_engines(self):
-        """Display available search engines"""
-        table = Table(title="Available Search Engines")
-        table.add_column("Engine", style="cyan")
-        table.add_column("Status", style="green")
-        table.add_column("Description", style="yellow")
+        # Parse languages
+        lang_list = []
+        if languages:
+            lang_list = [lang.strip() for lang in languages.split(',')]
         
-        engine_descriptions = {
-            "google": "Global search engine",
-            "bing": "Microsoft search engine", 
-            "duckduckgo": "Privacy-focused search",
-            "baidu": "Chinese search engine (with translation)"
-        }
-        
-        for engine in config.ENABLED_SEARCH_ENGINES:
-            description = engine_descriptions.get(engine, "Search engine")
-            table.add_row(engine, "✓ Enabled", description)
-        
-        console.print(table)
-    
-    async def search_documents_interactive(self):
-        """Interactive document search"""
-        console.print("\n[bold green]Starting Document Search[/bold green]")
-        
-        # Get search topic
-        query = click.prompt("Enter your search topic/subject", type=str)
-        if not query.strip():
-            console.print("[red]Error: Search topic cannot be empty[/red]")
-            return None
-        
-        # Get filter criteria
-        criteria = click.prompt("Enter filter criteria for AI analysis (optional)", default="", type=str)
-        
-        # Get search criteria
-        console.print("\n[bold]Search Criteria (optional):[/bold]")
-        max_results = click.prompt("Max results per engine", default=config.MAX_RESULTS_PER_ENGINE, type=int)
-        
-        # Ask about AI analysis (default enabled)
-        ai_analysis = True
-        if criteria.strip():
-            ai_analysis = click.confirm("Enable AI content analysis?", default=True)
-        else:
-            ai_analysis = click.confirm("Enable AI content analysis?", default=True)
-        
-        search_criteria = {
-            'max_results_per_engine': max_results,
-            'user_input': True,
-            'filter_criteria': criteria if criteria.strip() else None,
-            'ai_analysis': ai_analysis
-        }
-        
-        # Confirm search
-        console.print(f"\n[bold]Search Configuration:[/bold]")
-        console.print(f"Topic: {query}")
-        if criteria.strip():
-            console.print(f"Filter criteria: {criteria}")
-        console.print(f"Languages: {', '.join(config.SUPPORTED_LANGUAGES)}")
-        console.print(f"Engines: {', '.join(config.ENABLED_SEARCH_ENGINES)}")
-        console.print(f"Max results per engine: {max_results}")
-        console.print(f"AI Analysis: {'Yes' if ai_analysis else 'No'}")
-        
-        if not click.confirm("\nProceed with search?"):
-            console.print("[yellow]Search cancelled[/yellow]")
-            return None
-        
-        # Perform search with progress
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            task = progress.add_task("Searching documents...", total=None)
+            task = progress.add_task("Searching...", total=None)
             
-            try:
-                session_id = await self.search_service.search_documents(query, search_criteria)
-                
-                if session_id:
-                    progress.update(task, description="Search completed!")
-                    console.print(f"\n[green]✓ Search completed successfully![/green]")
-                    console.print(f"[bold]Session ID: {session_id}[/bold]")
-                    return session_id
-                else:
-                    progress.update(task, description="Search failed!")
-                    console.print(f"\n[red]✗ Search failed![/red]")
-                    return None
-                    
-            except Exception as e:
-                progress.update(task, description="Search error!")
-                console.print(f"\n[red]✗ Search error: {e}[/red]")
-                return None
-    
-    async def display_results(self, session_id: int):
-        """Display search results"""
-        console.print(f"\n[bold green]Search Results for Session {session_id}[/bold green]")
+            # Prepare search criteria
+            search_criteria = {
+                "criteria": criteria,
+                "max_results_per_engine": max_results,
+                "additional_languages": lang_list,
+                "ai_analysis": ai_analysis,
+                "ai_optimization": enable_ai_optimization,
+                "search_pages": search_pages,
+                "aggressive_search": aggressive_search
+            } if criteria or lang_list or aggressive_search else None
+            
+            # Run search
+            session_id = await self.plugin._search_service.search_documents(
+                query=query,
+                search_criteria=search_criteria
+            )
+            
+            progress.update(task, description="Search completed!")
         
-        # Get session summary
-        summary = await self.search_service.get_session_summary(session_id)
-        if not summary:
-            console.print("[red]Failed to get session summary[/red]")
+        if session_id:
+            console.print(f"\n[green]✓ Search completed! Session ID: {session_id}[/green]")
+            
+            # Export results
+            if export_format in ["csv", "excel", "both"]:
+                await self._export_results(session_id, export_format)
+        else:
+            console.print("\n[red]✗ Search failed! No session created.[/red]")
+    
+    async def _export_results(self, session_id: str, export_format: str):
+        """Export search results"""
+        console.print(f"\n[blue]📊 Exporting results...[/blue]")
+        
+        if not self.plugin._file_manager:
+            console.print("[red]File manager not available. Cannot export results.[/red]")
             return
         
-        # Display summary
-        console.print(f"\n[bold]Summary:[/bold]")
-        console.print(f"Original Query: {summary['original_query']}")
-        console.print(f"Status: {summary['status']}")
-        console.print(f"Total Results: {summary['total_results']}")
-        console.print(f"Downloaded: {summary['downloaded_count']}")
-        console.print(f"Failed: {summary['failed_count']}")
+        if export_format in ["csv", "both"]:
+            csv_file = self.plugin._file_manager.export_session_to_csv(int(session_id))
+            if csv_file:
+                console.print(f"[green]✓ CSV exported: {csv_file}[/green]")
         
-        # Display language statistics
-        if summary['language_stats']:
-            lang_table = Table(title="Results by Language")
-            lang_table.add_column("Language", style="cyan")
-            lang_table.add_column("Count", style="magenta")
-            
-            for lang, count in summary['language_stats'].items():
-                lang_name = config.LANGUAGE_NAMES.get(lang, lang)
-                lang_table.add_row(lang_name, str(count))
-            
-            console.print(lang_table)
-        
-        # Display engine statistics
-        if summary['engine_stats']:
-            engine_table = Table(title="Results by Search Engine")
-            engine_table.add_column("Engine", style="cyan")
-            engine_table.add_column("Count", style="magenta")
-            
-            for engine, count in summary['engine_stats'].items():
-                engine_table.add_row(engine, str(count))
-            
-            console.print(engine_table)
+        if export_format in ["excel", "both"]:
+            excel_file = self.plugin._file_manager.export_session_to_excel(int(session_id))
+            if excel_file:
+                console.print(f"[green]✓ Excel exported: {excel_file}[/green]")
     
-    async def export_results(self, session_id: int, export_format: str = 'csv'):
-        """Export search results"""
-        console.print(f"\n[bold green]Exporting Results for Session {session_id}[/bold green]")
+    async def _show_stats(self):
+        """Show storage statistics"""
+        console.print("\n[bold blue]📊 Storage Statistics[/bold blue]")
         
-        if export_format in ['csv', 'both']:
-            # Export to CSV
-            csv_path = await self.search_service.export_results(session_id, 'csv')
-            if csv_path:
-                console.print(f"[green]✓ CSV exported to: {csv_path}[/green]")
+        if not self.plugin._file_manager:
+            console.print("[red]File manager not available. Cannot show statistics.[/red]")
+            return
         
-        if export_format in ['excel', 'both']:
-            # Export to Excel
-            excel_path = await self.search_service.export_results(session_id, 'excel')
-            if excel_path:
-                console.print(f"[green]✓ Excel exported to: {excel_path}[/green]")
-    
-    def display_storage_stats(self):
-        """Display storage statistics"""
-        stats = self.file_manager.get_storage_stats()
+        stats = self.plugin._file_manager.get_storage_stats()
         
-        console.print(f"\n[bold green]Storage Statistics[/bold green]")
-        console.print(f"Total Sessions: {stats['total_sessions']}")
-        console.print(f"Total Files: {stats['total_files']}")
-        console.print(f"Total Size: {stats['total_size'] / (1024*1024):.2f} MB")
-        console.print(f"Date Directories: {stats['date_directories']}")
-        
-        # Display Redis deduplication stats
-        self.display_redis_stats()
-    
-    def display_redis_stats(self):
-        """Display Redis deduplication statistics"""
-        try:
-            redis_manager = get_redis_manager()
-            if not redis_manager.is_available():
-                console.print(f"\n[bold yellow]Redis Status:[/bold yellow] [red]Not Available[/red]")
-                console.print("[dim]Deduplication is disabled. Install Redis for duplicate detection.[/dim]")
-                return
+        if stats:
+            table = Table(title="Storage Statistics")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", style="green")
             
-            stats = redis_manager.get_duplicate_stats()
-            console.print(f"\n[bold green]Redis Deduplication Statistics[/bold green]")
-            console.print(f"Total processed URLs: {stats.get('total_processed', 0)}")
-            console.print(f"Unique URLs: {stats.get('unique_urls', 0)}")
-            console.print(f"Active sessions: {stats.get('active_sessions', 0)}")
-            console.print(f"[bold green]Redis Status:[/bold green] [green]Available[/green]")
+            for key, value in stats.items():
+                table.add_row(key, str(value))
             
-        except Exception as e:
-            console.print(f"[red]Error getting Redis stats: {e}[/red]")
+            console.print(table)
+        else:
+            console.print("[yellow]No statistics available[/yellow]")
+    
+    async def _show_session_results(self, session_id: str, export_format: str):
+        """Show results for a specific session"""
+        console.print(f"\n[bold blue]📋 Session Results: {session_id}[/bold blue]")
+        console.print("[yellow]Session results display not implemented yet[/yellow]")
+    
+    async def _interactive_mode(self):
+        """Interactive mode"""
+        console.print("\n[bold blue]🎯 Interactive Mode[/bold blue]")
+        console.print("[yellow]Interactive mode not implemented yet[/yellow]")
 
+# CLI Commands
 @click.command()
 @click.option('--query', '-q', help='Search topic/subject')
 @click.option('--criteria', '-c', help='Filter criteria for AI analysis')
-@click.option('--max-results', '-m', default=20, help='Max results per engine')
-@click.option('--export-format', '-f', type=click.Choice(['csv', 'excel', 'both']), default='csv', help='Export format (default: csv)')
-@click.option('--languages', '-l', help='Additional languages for search (comma-separated, e.g., "vi,ja,ko"). Default: search in original language only.')
-@click.option('--session-id', '-s', type=int, help='Session ID to view results')
+@click.option('--max-results', '-m', default=10, help='Max results per engine')
+@click.option('--export-format', '-f', default='csv', type=click.Choice(['csv', 'excel', 'both']), help='Export format')
+@click.option('--languages', '-l', help='Additional languages (comma-separated)')
+@click.option('--session-id', '-s', help='Session ID to view results')
 @click.option('--stats', is_flag=True, help='Show storage statistics')
 @click.option('--interactive', '-i', is_flag=True, help='Interactive mode')
-@click.option('--ai-analysis', '-a', is_flag=True, default=True, help='Enable AI content analysis (default: enabled)')
+@click.option('--ai-analysis', '-a', is_flag=True, default=True, help='Enable AI content analysis')
 @click.option('--no-ai', is_flag=True, help='Disable AI content analysis')
-@click.option('--enable-ai-optimization', is_flag=True, default=False, help='Enable AI query optimization (default: disabled)')
-@click.option('--search-pages', '-p', default=1, help='Number of search pages to fetch (default: 1, max: 3)')
-@click.option('--aggressive-search', is_flag=True, help='Use aggressive search settings for maximum results')
-def main(query, criteria, max_results, export_format, languages, session_id, stats, interactive, ai_analysis, no_ai, enable_ai_optimization, search_pages, aggressive_search):
-    """Documentation Collection - Multi-language document search and collection"""
+@click.option('--enable-ai-optimization', is_flag=True, help='Enable AI query optimization')
+@click.option('--search-pages', '-p', default=1, help='Number of search pages to fetch')
+@click.option('--aggressive-search', is_flag=True, help='Use aggressive search settings')
+def main(query, criteria, max_results, export_format, languages, session_id, 
+         stats, interactive, ai_analysis, no_ai, enable_ai_optimization,
+         search_pages, aggressive_search):
+    """Documentation Collection Plugin - Search and collect online documents"""
+    
+    if not any([query, session_id, stats, interactive]):
+        console.print("[red]Error: Please provide a query or use --stats, --session-id, or --interactive[/red]")
+        console.print("Use --help for more information")
+        return
     
     cli = DocumentationCollectionCLI()
-    
-    # Test database connection
-    if not db_manager.test_connection():
-        console.print("[red]✗ Database connection failed![/red]")
-        console.print("Please check your database configuration in .env file")
-        return
-    
-    # Display banner
-    cli.display_banner()
-    
-    # Show storage stats
-    if stats:
-        cli.display_storage_stats()
-        return
-    
-    # Prepare search criteria for async operations
-    search_criteria = None
-    if query:
-        console.print(f"[bold green]Searching for topic: {query}[/bold green]")
-        if criteria:
-            console.print(f"[bold blue]Filter criteria: {criteria}[/bold blue]")
-        
-        # Parse additional languages
-        additional_languages = []
-        if languages:
-            additional_languages = [lang.strip() for lang in languages.split(',') if lang.strip()]
-        
-        # Handle AI analysis flags
-        final_ai_analysis = ai_analysis and not no_ai
-        
-        # Ensure max_results has a default value
-        max_results = max_results or 20
-        
-        # Handle aggressive search settings
-        if aggressive_search:
-            # Aggressive search: use all languages, more results, multiple pages
-            if not additional_languages:
-                additional_languages = ['en', 'vi', 'ja', 'ko', 'ru', 'fa']  # All supported languages
-            max_results = max(max_results, 30)  # Minimum 30 results per engine
-            search_pages = max(search_pages, 2)  # Minimum 2 pages
-            console.print(f"[yellow]🔍 Aggressive search enabled: {max_results} results/engine, {search_pages} pages, {len(additional_languages)} languages[/yellow]")
-        
-        search_criteria = {
-            'max_results_per_engine': max_results,
-            'user_input': False,
-            'filter_criteria': criteria,
-            'ai_analysis': final_ai_analysis,
-            'ai_optimization': enable_ai_optimization,
-            'additional_languages': additional_languages,
-            'search_pages': search_pages,
-            'aggressive_search': aggressive_search
-        }
-    
-    async def main_async():
-        # View existing session
-        if session_id:
-            await cli.display_results(session_id)
-            if export_format in ['csv', 'excel', 'both']:
-                await cli.export_results(session_id, export_format)
-            return
-        
-        # Interactive mode
-        if interactive or not query:
-            cli.display_supported_languages()
-            cli.display_search_engines()
-            
-            current_session_id = await cli.search_documents_interactive()
-            if current_session_id:
-                await cli.display_results(current_session_id)
-                await cli.export_results(current_session_id, export_format)
-            return
-        
-        # Command line mode
-        if query:
-            current_session_id = await cli.search_service.search_documents(query, search_criteria)
-            if current_session_id:
-                console.print(f"[green]✓ Search completed! Session ID: {current_session_id}[/green]")
-                await cli.display_results(current_session_id)
-                await cli.export_results(current_session_id, export_format)
-            else:
-                console.print("[red]✗ Search failed![/red]")
-    
-    # Run async operations
-    asyncio.run(main_async())
+    asyncio.run(cli.run_search(
+        query=query or "",
+        criteria=criteria,
+        max_results=max_results,
+        export_format=export_format,
+        languages=languages,
+        session_id=session_id,
+        stats=stats,
+        interactive=interactive,
+        ai_analysis=ai_analysis,
+        no_ai=no_ai,
+        enable_ai_optimization=enable_ai_optimization,
+        search_pages=search_pages,
+        aggressive_search=aggressive_search
+    ))
 
 if __name__ == "__main__":
     main()

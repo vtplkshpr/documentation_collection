@@ -1,10 +1,10 @@
-# Translation Integration Between Modules
+# Translation Integration - Documentation Collection Plugin
 
-## Tổng quan
+## Overview
 
-Module `documentation_collection` sử dụng AI translation để dịch query trước khi tìm kiếm trong các ngôn ngữ khác nhau.
+The `documentation_collection` plugin uses AI translation to translate queries before searching in different languages using Ollama models.
 
-## Kiến trúc truyền input
+## Architecture
 
 ```
 documentation_collection/
@@ -16,9 +16,9 @@ documentation_collection/
 └── main.py                        # CLI entry point
 ```
 
-## Luồng xử lý
+## Processing Flow
 
-### 1. Input từ User
+### 1. User Input
 ```python
 # main.py
 query = "量子传感 军事 应用 filetype:pdf"
@@ -48,14 +48,14 @@ async def translate_text(self, text: str, target_language: str, source_language:
     # 1. Tạo prompt cho AI model
     prompt = self._create_translation_prompt(text, source_language, target_language)
     
-    # 2. Gọi Ollama API
+    # 2. Call Ollama API
     payload = {
-        "model": self.model_name,  # "tinyllama:latest"
+        "model": self.model_name,  # "llama2:latest"
         "prompt": prompt,
         "stream": False
     }
     
-    # 3. Gửi request đến Ollama
+    # 3. Send request to Ollama
     async with session.post(f"{self.base_url}/api/generate", json=payload) as response:
         result = await response.json()
         translated_text = result.get('response', '').strip()
@@ -78,7 +78,7 @@ Input:  "量子传感 军事 应用 filetype:pdf"
 Output: "quantum sensing military applications filetype:pdf"
 ```
 
-## Cấu trúc dữ liệu truyền
+## Data Structure
 
 ### Input Parameters
 ```python
@@ -92,7 +92,7 @@ Output: "quantum sensing military applications filetype:pdf"
 ### Translation Request (Ollama API)
 ```python
 {
-    "model": "tinyllama:latest",
+    "model": "llama2:latest",
     "prompt": "Translate this text from Chinese to English. Return only the translation, nothing else.\n\n量子传感 军事 应用 filetype:pdf",
     "stream": false
 }
@@ -187,23 +187,23 @@ LANGUAGE_NAMES = {
 
 ## Performance Considerations
 
-1. **Model Selection**: `tinyllama` nhanh hơn nhưng chất lượng thấp hơn `llama2`
-2. **Caching**: Có thể implement caching để tránh dịch lại cùng một query
-3. **Timeout**: Có timeout cho API calls để tránh hang
-4. **Batch Processing**: Có thể batch multiple translations
+1. **Model Selection**: `tinyllama:latest` is faster but lower quality than `llama2:latest`
+2. **Caching**: Implement caching to avoid re-translating the same query
+3. **Timeout**: Set timeout for API calls to prevent hanging
+4. **Batch Processing**: Batch multiple translations for efficiency
 
 ## Dependencies
 
-- `aiohttp`: HTTP client cho Ollama API
+- `aiohttp`: HTTP client for Ollama API
 - `asyncio`: Async/await support
-- `logging`: Logging và debugging
+- `logging`: Logging and debugging
 
 ## Testing
 
 ```bash
-# Test với query tiếng Trung
-python3 main.py --module documentation_collection --query "量子传感 军事 应用 filetype:pdf" --max-results 2
+# Test with Chinese query
+python3 main.py --plugin documentation_collection --query "量子传感 军事 应用 filetype:pdf" --max-results 2
 
-# Test với query tiếng Anh
-python3 main.py --module documentation_collection --query "quantum sensing military applications filetype:pdf" --max-results 2
+# Test with English query
+python3 main.py --plugin documentation_collection --query "quantum sensing military applications filetype:pdf" --max-results 2
 ```

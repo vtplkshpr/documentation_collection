@@ -1,10 +1,10 @@
 # 🔌 API Reference - Documentation Collection
 
-Programmatic API for integrating Documentation Collection into your applications.
+Programmatic API for integrating Documentation Collection plugin with aggressive search capabilities.
 
 ## 📋 Overview
 
-The Documentation Collection module provides both CLI and programmatic interfaces. This document covers the programmatic API for developers who want to integrate document search and collection functionality into their applications.
+The Documentation Collection plugin provides both CLI and programmatic interfaces. This document covers the programmatic API for developers who want to integrate document search and collection functionality with aggressive optimization into their applications.
 
 ## 🏗️ Architecture
 
@@ -32,17 +32,18 @@ import sys
 from pathlib import Path
 
 # Add module to path
-sys.path.append(str(Path(__file__).parent / "documentation_collection"))
+sys.path.append(str(Path(__file__).parent / "lkwolfSAI_ablilities" / "documentation_collection"))
 
 from services.search_service import SearchService
 
 # Initialize service
 search_service = SearchService()
 
-# Perform search
+# Perform aggressive search
 async def search_documents():
     session_id = await search_service.search_documents(
         query="artificial intelligence",
+        aggressive_search=True,
         search_criteria={"type": "research papers"}
     )
     return session_id
@@ -66,6 +67,7 @@ class SearchService:
     async def search_documents(
         self, 
         query: str, 
+        aggressive_search: bool = False,
         search_criteria: Dict[str, Any] = None
     ) -> int:
         """
@@ -73,6 +75,7 @@ class SearchService:
         
         Args:
             query: Search query string
+            aggressive_search: Enable aggressive search mode
             search_criteria: Optional criteria for AI analysis
             
         Returns:
@@ -257,9 +260,10 @@ from services.search_service import SearchService
 async def basic_search():
     search_service = SearchService()
     
-    # Perform search
+    # Perform aggressive search
     session_id = await search_service.search_documents(
-        query="machine learning algorithms"
+        query="machine learning algorithms",
+        aggressive_search=True
     )
     
     # Get results
@@ -279,9 +283,10 @@ asyncio.run(basic_search())
 async def advanced_search():
     search_service = SearchService()
     
-    # Search with AI analysis criteria
+    # Search with AI analysis criteria and aggressive search
     session_id = await search_service.search_documents(
         query="deep learning frameworks",
+        aggressive_search=True,
         search_criteria={
             "type": "technical documentation",
             "focus": "performance, scalability, ease of use",
@@ -314,7 +319,7 @@ async def multilingual_search():
     
     sessions = []
     for query in queries:
-        session_id = await search_service.search_documents(query)
+        session_id = await search_service.search_documents(query, aggressive_search=True)
         sessions.append(session_id)
     
     # Process all sessions
@@ -447,7 +452,7 @@ async def robust_search():
     search_service = SearchService()
     
     try:
-        session_id = await search_service.search_documents("test query")
+        session_id = await search_service.search_documents("test query", aggressive_search=True)
         results = await search_service.get_search_results(session_id)
         return results
         
@@ -507,7 +512,7 @@ async def concurrent_searches():
     # Create tasks
     tasks = []
     for query in queries:
-        task = search_service.search_documents(query)
+        task = search_service.search_documents(query, aggressive_search=True)
         tasks.append(task)
     
     # Run concurrently
@@ -539,7 +544,7 @@ async def search_service_context():
 
 async def use_service():
     async with search_service_context() as service:
-        session_id = await service.search_documents("test")
+        session_id = await service.search_documents("test", aggressive_search=True)
         return session_id
 
 asyncio.run(use_service())
@@ -559,7 +564,7 @@ async def test_search_service():
     service = SearchService()
     
     # Test search
-    session_id = await service.search_documents("test query")
+    session_id = await service.search_documents("test query", aggressive_search=True)
     assert isinstance(session_id, int)
     assert session_id > 0
     
@@ -581,7 +586,7 @@ async def test_full_workflow():
     service = SearchService()
     
     # Search
-    session_id = await service.search_documents("machine learning")
+    session_id = await service.search_documents("machine learning", aggressive_search=True)
     
     # Wait for completion
     await asyncio.sleep(5)

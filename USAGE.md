@@ -1,45 +1,56 @@
 # 📖 Usage Guide - Documentation Collection
 
-Complete guide for using the Documentation Collection tool effectively.
+Complete guide for using the Documentation Collection plugin with aggressive search capabilities.
 
 ## 🎯 Getting Started
 
-### Interactive Mode (Recommended for Beginners)
-
-The interactive mode provides a guided experience with beautiful terminal interface:
+### Quick Start
 
 ```bash
-python main.py --interactive
+# Basic search
+python main.py --plugin documentation_collection --query "artificial intelligence" --max-results 5
+
+# Aggressive search (recommended)
+python main.py --plugin documentation_collection --query "machine learning" --aggressive-search --max-results 10
+
+# Multi-language search
+python main.py --plugin documentation_collection --query "neural networks" --languages "vi,ja,ko" --aggressive-search
+```
+
+### Interactive Mode
+
+```bash
+python main.py --plugin documentation_collection --interactive
 ```
 
 **Step-by-step process:**
 1. **Welcome screen** - Displays supported languages and search engines
-2. **Enter search query** - Type your search topic (e.g., "artificial intelligence")
-3. **Set search criteria** - Optional: Define what type of documents you're looking for
-4. **Configure results** - Set maximum results per engine (default: 10)
+2. **Enter search query** - Type your search topic
+3. **Choose search mode** - Standard or aggressive search
+4. **Configure results** - Set maximum results per engine
 5. **Confirm and start** - Review settings and begin search
 6. **Monitor progress** - Watch real-time progress and statistics
 7. **View results** - Browse downloaded documents and analysis
 
-### Command Line Mode (For Automation)
+### Command Line Mode
 
 Perfect for scripts and automated workflows:
 
 ```bash
 # Basic search
-python main.py --query "machine learning" --max-results 5
+python main.py --plugin documentation_collection --query "machine learning" --max-results 5
 
-# Search with AI analysis criteria
-python main.py --query "deep learning" --criteria "technical specifications, research papers"
+# Aggressive search with AI analysis
+python main.py --plugin documentation_collection --query "deep learning" --aggressive-search --criteria "technical specifications, research papers"
 
-# Multi-language search
-python main.py --query "neural networks" --languages "vi,ja,ko" --max-results 3
+# Multi-language aggressive search
+python main.py --plugin documentation_collection --query "neural networks" --languages "vi,ja,ko" --aggressive-search --max-results 3
 
 # View previous session results
-python main.py --session-id 1
+python main.py --plugin documentation_collection --session-id 1
 
 # Export results
-python main.py --session-id 1 --export-format both
+python main.py --plugin documentation_collection --session-id 1 --export-format both
 ```
 
 ## 🔧 Advanced Configuration
@@ -73,10 +84,11 @@ AGGRESSIVE_SEARCH=false
 ### Command Line Options
 
 ```bash
-python main.py [OPTIONS]
+python main.py --plugin documentation_collection [OPTIONS]
 
 Options:
   --query, -q TEXT           Search topic/subject
+  --aggressive-search        Enable aggressive search mode
   --criteria, -c TEXT        Filter criteria for AI analysis
   --max-results, -m INTEGER  Max results per engine (default: 20)
   --languages, -l TEXT       Additional languages (comma-separated)
@@ -101,13 +113,13 @@ Options:
 
 ```bash
 # Search in original language only
-python main.py --query "artificial intelligence"
+python main.py --plugin documentation_collection --query "artificial intelligence"
 
-# Search in multiple languages
-python main.py --query "machine learning" --languages "vi,ja,ko"
+# Aggressive search in multiple languages
+python main.py --plugin documentation_collection --query "machine learning" --languages "vi,ja,ko" --aggressive-search
 
-# AI-powered query optimization (slower but potentially better)
-python main.py --query "neural networks" --enable-ai-optimization
+# AI-powered query optimization with aggressive search
+python main.py --plugin documentation_collection --query "neural networks" --aggressive-search --enable-ai-optimization
 ```
 
 ## 🤖 AI Features
@@ -117,8 +129,8 @@ python main.py --query "neural networks" --enable-ai-optimization
 Analyze downloaded documents against specific criteria:
 
 ```bash
-# Search with analysis criteria
-python main.py --query "computer vision" --criteria "algorithms, implementations, performance metrics"
+# Aggressive search with analysis criteria
+python main.py --plugin documentation_collection --query "computer vision" --aggressive-search --criteria "algorithms, implementations, performance metrics"
 
 # The AI will:
 # 1. Analyze each downloaded document
@@ -132,8 +144,8 @@ python main.py --query "computer vision" --criteria "algorithms, implementations
 Improve search queries for better results:
 
 ```bash
-# Enable AI query optimization
-python main.py --query "deep learning frameworks" --enable-ai-optimization
+# Enable AI query optimization with aggressive search
+python main.py --plugin documentation_collection --query "deep learning frameworks" --aggressive-search --enable-ai-optimization
 
 # Note: This feature is slower but may provide better search results
 ```
@@ -142,7 +154,7 @@ python main.py --query "deep learning frameworks" --enable-ai-optimization
 
 ```bash
 # Disable all AI analysis
-python main.py --query "machine learning" --no-ai
+python main.py --plugin documentation_collection --query "machine learning" --no-ai
 
 # AI analysis disabled, faster processing
 ```
@@ -153,33 +165,33 @@ python main.py --query "machine learning" --no-ai
 
 ```bash
 # List all search sessions
-python main.py --stats
+python main.py --plugin documentation_collection --stats
 
 # View specific session details
-python main.py --session-id 1
+python main.py --plugin documentation_collection --session-id 1
 
 # View with export options
-python main.py --session-id 1 --export-format csv
+python main.py --plugin documentation_collection --session-id 1 --export-format csv
 ```
 
 ### Export Options
 
 ```bash
 # Export to CSV (UTF-8 encoded)
-python main.py --session-id 1 --export-format csv
+python main.py --plugin documentation_collection --session-id 1 --export-format csv
 
 # Export to Excel
-python main.py --session-id 1 --export-format excel
+python main.py --plugin documentation_collection --session-id 1 --export-format excel
 
 # Export both formats
-python main.py --session-id 1 --export-format both
+python main.py --plugin documentation_collection --session-id 1 --export-format both
 ```
 
 ### Storage Management
 
 ```bash
 # Check storage statistics
-python main.py --stats
+python main.py --plugin documentation_collection --stats
 
 # Clean up old files (via script)
 python scripts/cleanup.py --days 30
@@ -273,11 +285,12 @@ storage/
 
 ### Performance Optimization
 
-1. **Start small** - Begin with 5-10 results per engine
-2. **Use specific queries** - More precise searches yield better results
-3. **Configure delays** - Balance speed vs. rate limiting
-4. **Monitor storage** - Regular cleanup of old files
-5. **Selective AI** - Use AI analysis only when needed
+1. **Use aggressive search** - Enable `--aggressive-search` for better results
+2. **Start small** - Begin with 5-10 results per engine
+3. **Use specific queries** - More precise searches yield better results
+4. **Configure delays** - Balance speed vs. rate limiting
+5. **Monitor storage** - Regular cleanup of old files
+6. **Selective AI** - Use AI analysis only when needed
 
 ## 🛠️ Troubleshooting
 
@@ -318,7 +331,7 @@ ls -la storage/
 echo $GEMINI_API_KEY
 
 # Test without AI
-python main.py --query "test" --no-ai
+python main.py --plugin documentation_collection --query "test" --no-ai
 ```
 
 ### Performance Issues
@@ -336,7 +349,7 @@ python main.py --query "test" --no-ai
 **Storage full:**
 ```bash
 # Check storage usage
-python main.py --stats
+python main.py --plugin documentation_collection --stats
 
 # Clean old files
 python scripts/cleanup.py --days 7
@@ -347,9 +360,9 @@ python scripts/cleanup.py --days 7
 ### Batch Processing
 
 ```bash
-# Process multiple queries
+# Process multiple queries with aggressive search
 for query in "machine learning" "deep learning" "neural networks"; do
-    python main.py --query "$query" --max-results 5 --no-ai
+    python main.py --plugin documentation_collection --query "$query" --aggressive-search --max-results 5 --no-ai
 done
 ```
 
@@ -363,7 +376,9 @@ import json
 def search_documents(query, max_results=10):
     cmd = [
         "python", "main.py",
+        "--plugin", "documentation_collection",
         "--query", query,
+        "--aggressive-search",
         "--max-results", str(max_results),
         "--export-format", "csv"
     ]
@@ -379,9 +394,9 @@ def search_documents(query, max_results=10):
 tail -f logs/documentation_collection.log
 
 # Monitor storage
-watch -n 5 'python main.py --stats'
+watch -n 5 'python main.py --plugin documentation_collection --stats'
 ```
 
 ---
 
-**Ready to start? Try the interactive mode: `python main.py --interactive`** 🚀
+**Ready to start? Try the interactive mode: `python main.py --plugin documentation_collection --interactive`** 🚀

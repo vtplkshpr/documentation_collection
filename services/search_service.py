@@ -40,6 +40,9 @@ class SearchService:
         self.criteria_analyzer = CriteriaAnalyzer(self.ai_analyzer)
         self.language_detector = LanguageDetector()
         self.redis_manager = get_redis_manager()
+        
+        # Semaphore for controlling concurrent searches
+        self.search_semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_SEARCHES)
     
     async def _translate_query_for_language(self, query: str, target_language: str, source_language: str = None) -> str:
         """
@@ -81,6 +84,218 @@ class SearchService:
             logger.error(f"Query translation failed: {e}")
             return query  # Fallback to original query
     
+    async def _create_optimized_queries(self, query: str, languages: List[str], source_language: str, 
+                                      search_engines: List[str], aggressive_search: bool = False) -> Dict[str, Dict[str, List[Dict]]]:
+        """
+        Create optimized queries with parallel translation for multiple languages and engines
+        
+        Args:
+            query: Original search query
+            languages: List of target languages
+            source_language: Source language code
+            search_engines: List of search engines
+            aggressive_search: Whether this is aggressive search mode
+            
+        Returns:
+            Optimized queries structure
+        """
+        logger.info(f"Creating optimized queries for {len(languages)} languages and {len(search_engines)} engines...")
+        
+        # Prepare translation tasks for parallel execution
+        translation_tasks = []
+        for language in languages:
+            task = self._translate_query_for_language(query, language, source_language)
+            translation_tasks.append((language, task))
+        
+        # Execute translations in parallel
+        translated_queries = {}
+        try:
+            # Run all translations concurrently
+            results = await asyncio.gather(*[task for _, task in translation_tasks], return_exceptions=True)
+            
+            for i, (language, _) in enumerate(translation_tasks):
+                if isinstance(results[i], Exception):
+                    logger.warning(f"Translation failed for {language}: {results[i]}")
+                    translated_queries[language] = query  # Fallback to original
+                else:
+                    translated_queries[language] = results[i]
+                    logger.info(f"✓ Translated {source_language}->{language}: '{query}' -> '{results[i]}'")
+        
+        except Exception as e:
+            logger.error(f"Parallel translation failed: {e}")
+            # Fallback: use original query for all languages
+            for language in languages:
+                translated_queries[language] = query
+        
+        # Create optimized query structure
+        optimized_queries = {}
+        
+        for language, translated_query in translated_queries.items():
+            optimized_queries[language] = {}
+            
+            for engine in search_engines:
+                # Check engine-specific language optimization
+                engine_config = config.ENGINE_LANGUAGE_OPTIMIZATION.get(engine, {})
+                auto_translate_langs = engine_config.get('auto_translate_languages', [])
+                skip_translation = engine_config.get('skip_translation', False)
+                
+                # Skip translation for engines that auto-translate specific languages
+                if skip_translation and language in auto_translate_langs:
+                    logger.info(f"🔄 {engine.title()} engine: Using original query for {language} (auto-translation enabled)")
+                    final_query = query
+                    query_type = 'original'
+                    reasoning = f'{engine.title()} auto-translation for {language}, using original {source_language} query'
+                else:
+                    final_query = translated_query
+                    query_type = 'translated'
+                    reasoning = f'Translated from {source_language} to {language}'
+                
+                optimized_queries[language][engine] = [{
+                    'query': final_query,
+                    'type': query_type,
+                    'confidence': 1.0,
+                    'reasoning': reasoning,
+                    'original_query': query,
+                    'source_language': source_language,
+                    'target_language': language,
+                    'aggressive_search': aggressive_search
+                }]
+        
+        logger.info(f"✓ Created optimized queries: {len(optimized_queries)} languages × {len(search_engines)} engines")
+        return optimized_queries
+    
+    async def _execute_parallel_search(self, queries_to_use: Dict[str, Dict[str, List[Dict]]], 
+                                     search_criteria: Dict[str, Any], session_id: int, original_query: str) -> List[SearchResult]:
+        """
+        Execute parallel search across multiple languages and engines
+        
+        Args:
+            queries_to_use: Optimized queries structure
+            search_criteria: Search criteria
+            session_id: Session ID
+            original_query: Original search query
+            
+        Returns:
+            List of search results
+        """
+        logger.info(f"🚀 Starting parallel search execution...")
+        
+        # Prepare search tasks for parallel execution
+        search_tasks = []
+        for language, engines in queries_to_use.items():
+            for engine, queries in engines.items():
+                for query_data in queries:
+                    search_query = query_data['query']
+                    task = self._execute_single_search(
+                        engine, search_query, language, query_data, 
+                        search_criteria, session_id, original_query
+                    )
+                    search_tasks.append(task)
+        
+        logger.info(f"📊 Executing {len(search_tasks)} search tasks in parallel...")
+        
+        # Execute all searches concurrently
+        try:
+            results = await asyncio.gather(*search_tasks, return_exceptions=True)
+            
+            # Combine all results and filter out exceptions
+            all_results = []
+            failed_searches = 0
+            
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    failed_searches += 1
+                    logger.warning(f"Search task {i} failed: {result}")
+                elif isinstance(result, list):
+                    all_results.extend(result)
+                elif result is not None:
+                    all_results.append(result)
+            
+            logger.info(f"✓ Parallel search completed: {len(all_results)} results, {failed_searches} failed")
+            return all_results
+            
+        except Exception as e:
+            logger.error(f"Parallel search execution failed: {e}")
+            return []
+    
+    async def _execute_single_search(self, engine: str, search_query: str, language: str, 
+                                   query_data: Dict, search_criteria: Dict[str, Any], 
+                                   session_id: int, original_query: str) -> List[SearchResult]:
+        """
+        Execute a single search task
+        
+        Args:
+            engine: Search engine name
+            search_query: Query to search
+            language: Target language
+            query_data: Query metadata
+            search_criteria: Search criteria
+            session_id: Session ID
+            original_query: Original search query
+            
+        Returns:
+            List of search results
+        """
+        async with self.search_semaphore:  # Control concurrent searches
+            try:
+                logger.info(f"🔍 Searching {engine} in {language}: {search_query}")
+                
+                # Determine max results based on aggressive search setting
+                max_results = (search_criteria or {}).get('max_results_per_engine', config.MAX_RESULTS_PER_ENGINE)
+                if query_data.get('aggressive_search', False):
+                    max_results = max(max_results, config.AGGRESSIVE_SEARCH_MAX_RESULTS)
+                
+                # Get search pages parameter
+                search_pages = (search_criteria or {}).get('search_pages', 1)
+                
+                # Execute search
+                results = await self.search_engine.search_single_engine(
+                    engine, search_query, max_results, search_pages
+                )
+                
+                # Process results with Redis deduplication
+                processed_results = []
+                for result in results:
+                    # Check for duplicates using Redis
+                    duplicate_data = self.redis_manager.check_duplicate(result.url, session_id)
+                    
+                    if duplicate_data:
+                        logger.debug(f"Duplicate URL skipped: {result.url}")
+                        continue
+                    
+                    # Create search result with translation metadata
+                    search_result = SearchResult(
+                        session_id=session_id,
+                        language=language,
+                        translated_query=search_query,
+                        search_engine=result.search_engine,
+                        url=result.url,
+                        title=result.title
+                    )
+                    processed_results.append(search_result)
+                    
+                    # Mark URL as processed in Redis with translation metadata
+                    result_data = {
+                        'url': result.url,
+                        'title': result.title,
+                        'search_engine': result.search_engine,
+                        'language': language,
+                        'translated_query': search_query,
+                        'original_query': query_data.get('original_query', search_query),
+                        'source_language': query_data.get('source_language', 'unknown'),
+                        'target_language': language,
+                        'session_id': session_id,
+                        'processed_at': datetime.now().isoformat()
+                    }
+                    self.redis_manager.mark_url_processed(result.url, session_id, result_data)
+                
+                logger.info(f"✓ {engine} ({language}): {len(processed_results)} results")
+                return processed_results
+                
+            except Exception as e:
+                logger.error(f"Single search failed for {engine} ({language}): {e}")
+                return []
+    
     async def search_documents(self, query: str, search_criteria: Dict[str, Any] = None) -> int:
         """
         Main method to search and collect documents
@@ -102,12 +317,12 @@ class SearchService:
             # Update session status
             await self._update_session_status(session_id, SearchStatus.PROCESSING)
             
-            # Step 1: Analyze criteria for flexible evaluation
+            # Step 1: Analyze criteria for flexible evaluation (if provided)
             analyzed_criteria = None
-            if search_criteria and search_criteria.get('filter_criteria'):
+            if search_criteria and search_criteria.get('criteria'):
                 logger.info("Analyzing criteria for flexible evaluation...")
                 analyzed_criteria = await self.criteria_analyzer.analyze_criteria(
-                    search_criteria.get('filter_criteria')
+                    search_criteria.get('criteria')
                 )
                 # Update search criteria with analyzed version
                 search_criteria['analyzed_criteria'] = analyzed_criteria
@@ -117,11 +332,23 @@ class SearchService:
             source_language = detection_result['language']
             logger.info(f"Detected source language: {source_language} (confidence: {detection_result['confidence']:.2f})")
             
-            # Step 3: Query optimization (AI optimization is optional)
-            # User can specify additional languages via --languages parameter
-            languages = search_criteria.get('additional_languages', []) or ['en']  # Default to English only
+            # Step 3: Query optimization with aggressive multi-language search
+            aggressive_search = (search_criteria or {}).get('aggressive_search', False)
+            ai_optimization_enabled = (search_criteria or {}).get('ai_optimization', False)
+            
+            if aggressive_search:
+                # Aggressive search: Use all supported languages except source language
+                all_languages = config.SUPPORTED_LANGUAGES.copy()
+                if source_language in all_languages:
+                    all_languages.remove(source_language)  # Remove source language
+                languages = all_languages
+                logger.info(f"🚀 AGGRESSIVE SEARCH: Using {len(languages)} languages for maximum coverage")
+            else:
+                # Normal search: Use specified languages or default to English
+                languages = (search_criteria or {}).get('additional_languages', []) or ['en']
+                logger.info(f"📝 Normal search: Using {len(languages)} specified languages")
+            
             search_engines = config.ENABLED_SEARCH_ENGINES
-            ai_optimization_enabled = search_criteria.get('ai_optimization', False)
             
             if ai_optimization_enabled:
                 logger.info(f"Optimizing queries with AI for {len(languages)} languages and {len(search_engines)} engines...")
@@ -132,24 +359,8 @@ class SearchService:
                 queries_to_use = optimized_queries
             else:
                 logger.info(f"Searching with translated queries for {len(languages)} languages and {len(search_engines)} engines...")
-                # Create query structure with translation
-                simple_queries = {}
-                for language in languages:
-                    # Translate query for this language
-                    translated_query = await self._translate_query_for_language(query, language, source_language)
-                    
-                    simple_queries[language] = {}
-                    for engine in search_engines:
-                        simple_queries[language][engine] = [{
-                            'query': translated_query,
-                            'type': 'translated',
-                            'confidence': 1.0,
-                            'reasoning': f'Translated from {source_language} to {language}',
-                            'original_query': query,
-                            'source_language': source_language,
-                            'target_language': language
-                        }]
-                queries_to_use = simple_queries
+                # Create optimized query structure with parallel translation
+                queries_to_use = await self._create_optimized_queries(query, languages, source_language, search_engines, aggressive_search)
             
             # Step 3: Export query info to CSV for tracking
             session_dir = self.file_manager.get_session_directory(session_id)
@@ -160,62 +371,8 @@ class SearchService:
                 )
                 logger.info(f"Exported query info to: {optimized_queries_path}")
             
-            # Step 4: Search using queries (optimized or translated)
-            all_results = []
-            for language, engines in queries_to_use.items():
-                for engine, queries in engines.items():
-                    for query_data in queries:
-                        search_query = query_data['query']
-                        logger.info(f"Searching {engine} in {language}: {search_query}")
-                        
-                        # Search with query - use aggressive settings if enabled
-                        max_results = search_criteria.get('max_results_per_engine', config.MAX_RESULTS_PER_ENGINE)
-                        if search_criteria.get('aggressive_search', False):
-                            # For aggressive search, try to get more results
-                            max_results = max(max_results, 30)
-                        
-                        # Get search pages parameter
-                        search_pages = search_criteria.get('search_pages', 1)
-                        
-                        results = await self.search_engine.search_single_engine(
-                            engine, search_query, max_results, search_pages
-                        )
-                        
-                        # Process results with Redis deduplication
-                        for result in results:
-                            # Check for duplicates using Redis
-                            duplicate_data = self.redis_manager.check_duplicate(result.url, session_id)
-                            
-                            if duplicate_data:
-                                # URL is duplicate, skip but log
-                                logger.info(f"Duplicate URL skipped: {result.url} (found in {duplicate_data.get('search_engine', 'unknown')})")
-                                continue
-                            
-                            # Create search result with translation metadata
-                            search_result = SearchResult(
-                                session_id=session_id,
-                                language=language,
-                                translated_query=search_query,
-                                search_engine=result.search_engine,
-                                url=result.url,
-                                title=result.title
-                            )
-                            all_results.append(search_result)
-                            
-                            # Mark URL as processed in Redis with translation metadata
-                            result_data = {
-                                'url': result.url,
-                                'title': result.title,
-                                'search_engine': result.search_engine,
-                                'language': language,
-                                'translated_query': search_query,
-                                'original_query': query_data.get('original_query', search_query),
-                                'source_language': query_data.get('source_language', 'unknown'),
-                                'target_language': language,
-                                'session_id': session_id,
-                                'processed_at': datetime.now().isoformat()
-                            }
-                            self.redis_manager.mark_url_processed(result.url, session_id, result_data)
+            # Step 4: Parallel search execution with optimized queries
+            all_results = await self._execute_parallel_search(queries_to_use, search_criteria, session_id, query)
             
             # Save all results to database
             await self._save_search_results(all_results)
@@ -229,7 +386,7 @@ class SearchService:
             await self._download_documents(session_id, all_results)
             
             # AI Analysis and filtering if enabled
-            if search_criteria.get('ai_analysis', True) and analyzed_criteria:
+            if (search_criteria or {}).get('ai_analysis', True) and analyzed_criteria:
                 print(f"Performing AI analysis for session {session_id} with analyzed criteria")
                 relevant_files = await self._perform_ai_analysis_with_criteria(session_id, analyzed_criteria)
                 
@@ -284,14 +441,27 @@ class SearchService:
             logger.error(f"Failed to update session status: {e}")
     
     async def _save_search_results(self, results: List[SearchResult]):
-        """Save search results to database"""
+        """Save search results to database using batch insert for better performance"""
+        if not results:
+            return
+            
         try:
             with db_manager.get_session() as session:
-                for result in results:
-                    session.add(result)
-                logger.info(f"Saved {len(results)} search results to database")
+                # Use bulk insert for better performance
+                session.bulk_save_objects(results)
+                session.commit()
+                logger.info(f"✓ Saved {len(results)} search results to database (batch insert)")
         except Exception as e:
             logger.error(f"Failed to save search results: {e}")
+            # Fallback to individual inserts
+            try:
+                with db_manager.get_session() as session:
+                    for result in results:
+                        session.add(result)
+                    session.commit()
+                    logger.info(f"✓ Saved {len(results)} search results to database (individual inserts)")
+            except Exception as e2:
+                logger.error(f"Failed to save search results even with fallback: {e2}")
     
     async def _download_documents(self, session_id: int, results: List[SearchResult]):
         """Download documents for search results"""

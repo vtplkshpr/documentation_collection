@@ -19,6 +19,11 @@ class Config:
     REQUEST_DELAY = float(os.getenv('REQUEST_DELAY', '1.0'))
     MAX_CONCURRENT_DOWNLOADS = int(os.getenv('MAX_CONCURRENT_DOWNLOADS', '5'))
     
+    # Aggressive Search Configuration
+    AGGRESSIVE_SEARCH_MAX_RESULTS = int(os.getenv('AGGRESSIVE_SEARCH_MAX_RESULTS', '30'))
+    MAX_CONCURRENT_SEARCHES = int(os.getenv('MAX_CONCURRENT_SEARCHES', '10'))
+    PARALLEL_TRANSLATION_ENABLED = os.getenv('PARALLEL_TRANSLATION_ENABLED', 'True').lower() == 'true'
+    
     # Storage Configuration
     STORAGE_BASE_PATH = os.getenv('STORAGE_BASE_PATH', '/home/lkshpr/ownpr/lkwolfSAI/lkwolfSAI_storage/lkwolfSAI_abilities/documentation_collection')
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', '52428800'))  # 50MB
@@ -37,6 +42,30 @@ class Config:
     BING_SEARCH_DELAY = float(os.getenv('BING_SEARCH_DELAY', '1.5'))
     DUCKDUCKGO_SEARCH_DELAY = float(os.getenv('DUCKDUCKGO_SEARCH_DELAY', '1.0'))
     BAIDU_SEARCH_DELAY = float(os.getenv('BAIDU_SEARCH_DELAY', '1.5'))
+    
+    # Engine-specific language optimization
+    ENGINE_LANGUAGE_OPTIMIZATION = {
+        'baidu': {
+            'auto_translate_languages': ['zh'],  # Languages that Baidu auto-translates
+            'preferred_language': 'zh',
+            'skip_translation': True
+        },
+        'google': {
+            'auto_translate_languages': [],
+            'preferred_language': 'en',
+            'skip_translation': False
+        },
+        'bing': {
+            'auto_translate_languages': [],
+            'preferred_language': 'en', 
+            'skip_translation': False
+        },
+        'duckduckgo': {
+            'auto_translate_languages': [],
+            'preferred_language': 'en',
+            'skip_translation': False
+        }
+    }
     
     # Supported Languages
     SUPPORTED_LANGUAGES = ['en', 'vi', 'ja', 'ko', 'ru', 'fa', 'zh']
